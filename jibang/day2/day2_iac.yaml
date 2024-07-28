@@ -121,7 +121,7 @@ Resources:
       Tags: 
         - Key : Name
           Value : !Join ["-", [!FindInMap [ResourceMap, NatGateway, Name], "b"]]
-      
+
   PublicSubnetRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -192,8 +192,8 @@ Resources:
       SecurityGroups: 
         - !Ref ApplicationLoadBalancerSecurityGroup
       Subnets:
-        - !Ref PrivateSubnetA
-        - !Ref PrivateSubnetB
+        - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
       Type: application
   ApplicationLoadBalancerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -215,30 +215,13 @@ Resources:
       LoadBalancerArn: !GetAtt ApplicationLoadBalancer.LoadBalancerArn
       Port: 80
       Protocol: HTTP
-  ListenerRule:
-    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    Properties:
-      Actions:
-        - Type: forward
-          ForwardConfig:
-            TargetGroups:
-              - TargetGroupArn: !Ref TargetGroup1
-                Weight: 1
-      Conditions:
-        - Field: http-header
-          HttpHeaderConfig:
-            HttpHeaderName: User-Agent
-            Values:
-              - Mozilla
-      ListenerArn: !Ref Listener
-      Priority: 1
   TargetGroup1:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       HealthCheckEnabled: True
       HealthCheckIntervalSeconds: 10
       HealthCheckPath: /api/health
-      HealthCheckPort: 80
+      HealthCheckPort: 8080
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
@@ -246,7 +229,7 @@ Resources:
         HttpCode: 200
       IpAddressType: ipv4
       Name: skills-tg1
-      Port: 80
+      Port: 8080
       Protocol: HTTP
       TargetType: ip
       UnhealthyThresholdCount: 4
@@ -257,7 +240,7 @@ Resources:
       HealthCheckEnabled: True
       HealthCheckIntervalSeconds: 10
       HealthCheckPath: /api/health
-      HealthCheckPort: 80
+      HealthCheckPort: 8080
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
@@ -265,7 +248,7 @@ Resources:
         HttpCode: 200
       IpAddressType: ipv4
       Name: skills-tg2
-      Port: 80
+      Port: 8080
       Protocol: HTTP
       TargetType: ip
       UnhealthyThresholdCount: 4
@@ -285,7 +268,7 @@ Resources:
     CreationPolicy:
       ResourceSignal:
         Count: '1'                
-        Timeout: PT5M
+        Timeout: PT10M
     Properties:
       ImageId: !FindInMap [RegionMap, !Ref AWS::Region, AmazonLinux2023]
       InstanceType: !FindInMap [ResourceMap, BastionEc2, InstanceType]
@@ -311,34 +294,7 @@ Resources:
             systemctl enable docker
             usermod -aG docker ec2-user
             newgrp docker
-            echo 'package main
-
-            import (
-                "fmt"
-                "net/http"
-            )
-
-            func health(w http.ResponseWriter, req *http.Request) {
-                fmt.Fprint(w, "OK")
-            }
-
-            func dummy(w http.ResponseWriter, req *http.Request) {
-                fmt.Fprint(w, "BLUE")
-            }
-
-            func main() {
-                http.HandleFunc("/health", health)
-                http.HandleFunc("/v1/dummy", dummy)
-                http.ListenAndServe(":80", nil)
-            }' > main.go
-            echo 'FROM golang:1.16
-            WORKDIR /app
-            COPY main.go .
-            RUN go build main.go
-            EXPOSE 80
-            CMD ["./main"]' > Dockerfile
-            zip backend.zip main.go
-            aws s3 cp backend.zip s3://${CodeCommitSourceS3Bucket}
+            sudo dnf install git -y
             echo '<!DOCTYPE html>
             <html lang="en">
             <head>
@@ -368,9 +324,81 @@ Resources:
             </html>' > index.html
             zip frontend.zip index.html
             aws s3 cp frontend.zip s3://${CodeCommitSourceS3Bucket}
+            curl -s "https://get.sdkman.io" | bash && source "/.sdkman/bin/sdkman-init.sh"
+            sdk install java 17.0.12-amzn
+            sdk install springboot
+            sdk install gradle 8.6
+            spring init -a=skills-backend -g=org.worldskills.cloud --build=gradle --type=gradle-project -d=web -n=skills-backend -p=jar --package-name=org.worldskills.cloud.skillsbackend -x skills-backend
+            echo 'package org.worldskills.cloud.skillsbackend;
+
+            import org.slf4j.Logger;
+            import org.slf4j.LoggerFactory;
+            import org.springframework.boot.SpringApplication;
+            import org.springframework.boot.autoconfigure.SpringBootApplication;
+            import org.springframework.http.HttpStatus;
+            import org.springframework.http.ResponseEntity;
+            import org.springframework.web.bind.annotation.GetMapping;
+            import org.springframework.web.bind.annotation.RestController;
+
+            import java.time.LocalDateTime;
+            import java.util.HashMap;
+            import java.util.Map;
+
+            @SpringBootApplication
+            @RestController
+            public class SkillsBackendApplication {
+                private final Logger log = LoggerFactory.getLogger(this.getClass().getSimpleName());
+
+                public static void main(String[] args) {
+                    SpringApplication.run(SkillsBackendApplication.class, args);
+                }
+
+                @GetMapping("/api/")
+                public ResponseEntity<String> index() {
+                    String text = "Hello, World!";
+
+                    log.info("GET | /api/ |200");
+
+                    return new ResponseEntity<>(text, HttpStatus.OK);
+                }
+
+                @GetMapping("/api/time")
+                public ResponseEntity<Map<String, Object>> time() {
+                    Map<String, Object> data = new HashMap<>();
+
+                    LocalDateTime currentDateTime = LocalDateTime.now();
+
+                    data.put("time", currentDateTime);
+
+                    log.info("GET | /api/time | 200");
+
+                    return new ResponseEntity<>(data, HttpStatus.OK);
+                }
+
+                @GetMapping("/api/health")
+                public ResponseEntity<Map<String, Object>> health() {
+                    Map<String, Object> data = new HashMap<>();
+                    data.put("status", "OK");
+
+                    log.info("GET | /api/health | 200");
+
+                    return new ResponseEntity<>(data, HttpStatus.OK);
+                }
+            }' > /skills-backend/src/main/java/org/worldskills/cloud/skillsbackend/SkillsBackendApplication.java
+            cd /skills-backend && zip -r /backend.zip . && cd /
+            aws s3 cp backend.zip s3://${CodeCommitSourceS3Bucket}
+            git config --system credential.helper '!aws codecommit credential-helper $@'
+            git config --system credential.UseHttpPath true
+            echo 'FROM public.ecr.aws/amazonlinux/amazonlinux:2023
+            WORKDIR /app
+            RUN yum update -y && yum install -y java-17-amazon-corretto-headless
+            COPY . .
+            EXPOSE 8080
+            CMD ["java", "-jar", "./build/libs/skills-backend-0.0.1-SNAPSHOT.jar"]' > /skills-backend/Dockerfile
             aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
             IMAGE_TAG=${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Ecr}:prototype
-            docker build -t $IMAGE_TAG .
+            gradle clean build -p /skills-backend
+            docker build -t $IMAGE_TAG /skills-backend
             docker push $IMAGE_TAG
             /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource BastionEc2 --region ${AWS::Region}
   BastionEc2SecurityGroup:
@@ -410,216 +438,6 @@ Resources:
     Properties:
       InstanceId: !Ref BastionEc2
 
-  EcsAutoScalingGroupIamRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - ec2.amazonaws.com
-            Action:
-              - 'sts:AssumeRole'
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceAutoscaleRole
-        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
-      RoleName: EcsAutoScalingGroupIamRole
-  EcsAutoScalingGroupProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      InstanceProfileName: EcsAutoScalingGroupProfile
-      Roles: 
-        - !Ref BastionEc2IamRole
-  EcsCluster:
-    Type: AWS::ECS::Cluster
-    Properties:
-      ClusterName: skills-ecs-cluster
-      ClusterSettings:
-        - Name: containerInsights
-          Value: disabled
-      Configuration:
-        ExecuteCommandConfiguration:
-          Logging: DEFAULT
-  EcsLaunchTemplate:
-    Type: AWS::EC2::LaunchTemplate
-    DependsOn: EcsCluster
-    Properties:
-      LaunchTemplateData:
-        ImageId: !FindInMap [RegionMap, !Ref AWS::Region, AmazonLinux2023]
-        TagSpecifications:
-          - ResourceType: instance
-            Tags: 
-              - Key: Name
-                Value: ecs-asg-instance
-        NetworkInterfaces:
-          - DeviceIndex: 0
-            DeleteOnTermination: true
-            Groups: 
-              - !Ref EcsAutoScalingGroupSecurityGroup
-        KeyName: !Ref KeyPair
-        IamInstanceProfile: 
-          Arn: !GetAtt EcsAutoScalingGroupProfile.Arn
-        UserData:
-          Fn::Base64:
-            !Sub |
-              #!/bin/bash -xe
-              exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
-              dnf update -y
-              dnf install docker -y
-              systemctl start docker
-              systemctl enable docker
-              usermod -aG docker ec2-user
-              newgrp docker
-              curl -O https://s3.${AWS::Region}.amazonaws.com/amazon-ecs-agent-${AWS::Region}/amazon-ecs-init-latest.x86_64.rpm
-              yum localinstall -y amazon-ecs-init-latest.x86_64.rpm
-              sed -i "s/After=docker.service/After=cloud-final.service/g" /lib/systemd/system/ecs.service
-              mkdir -p /etc/ecs
-              echo "ECS_CLUSTER=skills-cluster" > /etc/ecs/ecs.config
-              systemctl enable --now --no-block ecs.service
-  EcsAutoScalingGroup:
-    Type: AWS::AutoScaling::AutoScalingGroup
-    DependsOn: EcsCluster
-    Properties:
-      MinSize: 1
-      MaxSize: 10
-      DesiredCapacity: 3
-      Cooldown: 0
-      MixedInstancesPolicy:
-        LaunchTemplate:
-          LaunchTemplateSpecification:
-            LaunchTemplateId: !Ref EcsLaunchTemplate
-            Version: !GetAtt EcsLaunchTemplate.LatestVersionNumber
-          Overrides:
-            - InstanceType: t3.micro
-        InstancesDistribution:
-          OnDemandBaseCapacity: 0
-          OnDemandPercentageAboveBaseCapacity: 0
-          SpotAllocationStrategy: price-capacity-optimized
-      VPCZoneIdentifier:
-        - !Ref PrivateSubnetA
-        - !Ref PrivateSubnetB
-        - !Ref PrivateSubnetC
-  EcsAutoScalingGroupSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security Group for ASG
-      GroupName: asg-sg
-      VpcId: !Ref Vpc
-      SecurityGroupIngress:
-        - FromPort: 22
-          IpProtocol: tcp
-          SourceSecurityGroupId: !Ref BastionEc2SecurityGroup
-          ToPort: 22
-  EcsCapacityProvider:
-    Type: AWS::ECS::CapacityProvider
-    Properties:
-      AutoScalingGroupProvider:
-        AutoScalingGroupArn: !Ref EcsAutoScalingGroup
-        ManagedScaling:
-          InstanceWarmupPeriod: 60
-          Status: ENABLED
-          TargetCapacity: 100
-        ManagedTerminationProtection: DISABLED
-  ClusterCPAssociation:
-    Type: AWS::ECS::ClusterCapacityProviderAssociations
-    DependsOn: EcsCluster
-    Properties:
-      Cluster: !Ref EcsCluster
-      CapacityProviders:
-        - !Ref EcsCapacityProvider
-      DefaultCapacityProviderStrategy:
-        - Base: 0
-          Weight: 1
-          CapacityProvider: !Ref EcsCapacityProvider
-  EcsTaskExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Sid: ''
-            Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-            Action: 'sts:AssumeRole'
-      ManagedPolicyArns:
-        - 'arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy'
-  EcsTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    DependsOn: BastionEc2
-    Properties:
-      ExecutionRoleArn: !GetAtt EcsTaskExecutionRole.Arn
-      ContainerDefinitions:
-        - Name: golang-app
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Ecr}:prototype
-          Essential: true
-          PortMappings:
-            - HostPort: 80
-              Protocol: tcp
-              ContainerPort: 80
-          HealthCheck:
-            Command: 
-              - "CMD-SHELL"
-              - "curl -f http://localhost/health || exit 1"
-      NetworkMode: awsvpc
-      Cpu: 512
-      Memory: 1024
-      Family: skills-td
-  EcsSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security Group for ECS
-      GroupName: skills-ecs-sg
-      VpcId: !Ref Vpc
-      SecurityGroupIngress:
-        - FromPort: 80
-          ToPort: 80
-          IpProtocol: tcp
-          SourceSecurityGroupId: !Ref ApplicationLoadBalancerSecurityGroup
-        - FromPort: 443
-          ToPort: 443
-          IpProtocol: tcp
-          SourceSecurityGroupId: !Ref ApplicationLoadBalancerSecurityGroup
-  EcsTaskCloudWatchLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /ecs/skills-td
-  EcsService:
-    Type: AWS::ECS::Service
-    DependsOn: 
-      - Listener
-      - EcsTaskCloudWatchLogGroup
-    Properties:
-      Cluster: skills-cluster
-      TaskDefinition: !Ref EcsTaskDefinition
-      ServiceName: backend
-      SchedulingStrategy: REPLICA
-      DesiredCount: 2
-      LoadBalancers:
-        - ContainerName: golang-app
-          ContainerPort: 80
-          TargetGroupArn: !Ref TargetGroup1
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          SecurityGroups:
-            - !Ref EcsSecurityGroup
-          Subnets:
-            - !Ref PrivateSubnetA
-            - !Ref PrivateSubnetB
-            - !Ref PrivateSubnetC
-      DeploymentController:
-        Type: CODE_DEPLOY
-      ServiceConnectConfiguration:
-        Enabled: false
-      PlacementStrategies:
-        - Field: attribute:ecs.availability-zone
-          Type: spread
-        - Field: instanceId
-          Type: spread
-      EnableECSManagedTags: true
-
   CodeCommitSourceS3Bucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: RetainExceptOnCreate
@@ -647,7 +465,7 @@ Resources:
               - HEAD
             CachePolicyId: !Ref CloudFrontCachingDisabledPolicy
             OriginRequestPolicyId: !Ref CloudFrontOriginRequestPolicy
-            PathPattern: v1/*
+            PathPattern: api/*
             TargetOriginId: AlbApi
             ViewerProtocolPolicy: redirect-to-https
         DefaultRootObject: index.html
@@ -656,9 +474,7 @@ Resources:
         IPV6Enabled: False
         Origins: 
           - DomainName: 
-              !Sub 
-                - '${S3BucketName}.s3.${AWS::Region}.amazonaws.com'
-                - S3BucketName: !Ref OriginS3Bucket
+              !Sub '${FrontendS3Bucket}.s3.${AWS::Region}.amazonaws.com'
             Id: S3Static
             OriginAccessControlId: !GetAtt CloudFrontOriginAccessControl.Id
             S3OriginConfig:
@@ -738,9 +554,10 @@ Resources:
       RepositoryName: !FindInMap [ResourceMap, FrontendCodePipeline, Source]
   FrontendS3Bucket:
     Type: AWS::S3::Bucket
-    BucketName: !Sub
-      - "skills-frontend-${Id}"
-      - Id: !Select [3, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]
+    Properties:
+      BucketName: !Sub
+        - "skills-frontend-${Id}"
+        - Id: !Select [3, !Split ['-', !Select [2, !Split ['/', !Ref AWS::StackId]]]]
     DeletionPolicy: RetainExceptOnCreate
   FrontendS3BucketPolicy:
     Type: AWS::S3::BucketPolicy
@@ -788,13 +605,13 @@ Resources:
               ActionTypeId: 
                 Category: Deploy
                 Owner: AWS
-                Provider: CodeDeploy
+                Provider: S3
                 Version: 1
               Configuration:
-                ApplicationName: !Ref FrontendCodeDeployApplication
-                DeploymentGroupName: !Ref CodeDeployDeploymentGroup
+                BucketName: !Ref FrontendS3Bucket
+                Extract: true
               InputArtifacts:
-                - Name: BuildOutput
+                - Name: SourceOutput
   FrontendCodePipelineArtifactStoreS3Bucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: RetainExceptOnCreate
@@ -811,7 +628,7 @@ Resources:
             Action:
               - 'sts:AssumeRole'
       Policies:
-        - PolicyName: CodePipelinePolicy
+        - PolicyName: FrontendCodePipelinePolicy
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -832,38 +649,10 @@ Resources:
                   - !GetAtt FrontendCodeCommit.Arn
               - Effect: Allow
                 Action:
-                  - codebuild:StartBuild
-                  - codebuild:BatchGetBuilds
-                Resource:
-                  - !GetAtt CodeBuild.Arn
-              - Effect: Allow
-                Action:
-                  - codedeploy:CreateDeployment
-                  - codedeploy:GetDeployment
-                Resource:
-                  - !Sub 
-                      - "arn:aws:codedeploy:${AWS::Region}:${AWS::AccountId}:deploymentgroup:${CodeDeployApplication}/${CodeDeployDeploymentGroup}"
-                      - CodeDeployApplication: !FindInMap [ResourceMap, FrontendCodePipeline, DeployApplication]
-                        CodeDeployDeploymentGroup: !FindInMap [ResourceMap, FrontendCodePipeline, DeploymentGroup]
-              - Effect: Allow
-                Action:
-                  - codedeploy:GetDeploymentConfig
-                Resource:
-                  - !Sub "arn:aws:codedeploy:${AWS::Region}:${AWS::AccountId}:deploymentconfig:CodeDeployDefault.ECSAllAtOnce"
-              - Effect: Allow
-                Action:
-                  - codedeploy:RegisterApplicationRevision
-                  - codedeploy:GetApplicationRevision
-                Resource:
-                  - !Sub 
-                      - "arn:aws:codedeploy:${AWS::Region}:${AWS::AccountId}:application:${CodeDeployApplication}"
-                      - CodeDeployApplication: !FindInMap [ResourceMap, FrontendCodePipeline, DeployApplication]
-              - Effect: Allow
-                Action:
                   - s3:GetObject
                   - s3:PutObject
                 Resource: "*"
-      RoleName: CodePipelineRole
+      RoleName: FrontendCodePipelineRole
   FrontendCloudWatchEventRule:
     Type: AWS::Events::Rule
     Properties:
@@ -895,8 +684,101 @@ Resources:
         - Id: frontend-codepipeline
           Arn: !Sub 
             - "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${CodePipeline}"
-            - CodePipeline: !FindInMap [ResourceMap, FrontendCodeCommit, Name]
+            - CodePipeline: !FindInMap [ResourceMap, FrontendCodePipeline, Name]
           RoleArn: !GetAtt CloudWatchEventRuleIamRole.Arn
+
+  EcsCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: skills-ecs-cluster
+      CapacityProviders:
+        - FARGATE_SPOT
+      ClusterSettings:
+        - Name: containerInsights
+          Value: disabled
+      Configuration:
+        ExecuteCommandConfiguration:
+          Logging: DEFAULT
+  EcsTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: 'sts:AssumeRole'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+  EcsTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ExecutionRoleArn: !GetAtt EcsTaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: skills-container
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${Ecr}:prototype
+          Essential: true
+          PortMappings:
+            - HostPort: 8080
+              Protocol: tcp
+              ContainerPort: 8080
+          HealthCheck:
+            Command: 
+              - "CMD-SHELL"
+              - "curl -f http://localhost:8080/api/health || exit 1"
+      NetworkMode: awsvpc
+      Cpu: 256
+      Memory: 512
+      Family: skills-td
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+  EcsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for ECS
+      GroupName: skills-ecs-sg
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - FromPort: 8080
+          ToPort: 8080
+          IpProtocol: tcp
+          SourceSecurityGroupId: !Ref ApplicationLoadBalancerSecurityGroup
+  EcsTaskCloudWatchLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/skills-td
+  EcsService:
+    Type: AWS::ECS::Service
+    DependsOn: 
+      - Listener
+      - EcsTaskCloudWatchLogGroup
+    Properties:
+      ServiceName: backend
+      Cluster: !Ref EcsCluster
+      CapacityProviderStrategy:
+        - Base: 0
+          CapacityProvider: FARGATE_SPOT
+          Weight: 1
+      TaskDefinition: !Ref EcsTaskDefinition
+      DesiredCount: 2
+      LoadBalancers:
+        - ContainerName: skills-container
+          ContainerPort: 8080
+          TargetGroupArn: !Ref TargetGroup1
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          SecurityGroups:
+            - !Ref EcsSecurityGroup
+          Subnets:
+            - !Ref PrivateSubnetA
+            - !Ref PrivateSubnetB
+      DeploymentController:
+        Type: CODE_DEPLOY
 
   BackendCodeCommit:
     Type: AWS::CodeCommit::Repository
@@ -932,16 +814,26 @@ Resources:
               commands:
                 - ln -sf /usr/share/zoneinfo/Asia/Seoul /etc/localtime
                 - | 
-                  echo 'FROM golang:1.16
+                  echo 'FROM public.ecr.aws/amazonlinux/amazonlinux:2023
                   WORKDIR /app
+                  RUN yum update -y && yum install -y java-17-amazon-corretto-headless
                   COPY . .
-                  RUN go build main.go
-                  EXPOSE 80
-                  CMD ["./main"]' > Dockerfile
+                  EXPOSE 8080
+                  CMD ["java", "-jar", "./build/libs/skills-backend-0.0.1-SNAPSHOT.jar"]' > Dockerfile
                 - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+                - yum install -y wget unzip java-17-amazon-corretto-headless findutils
+                - wget http://services.gradle.org/distributions/gradle-8.6-bin.zip
+                - mkdir /usr/local/gradle
+                - unzip gradle-8.6-bin.zip -d /usr/local/gradle
             build:
               commands:
-                - IMAGE_VERSION=$(LC_TIME=ko_KR.UTF-8 date +'%Y-%m-%d.%H.%M.%S')
+                # gradle
+                - GRADLE_HOME=/usr/local/gradle/gradle-8.6
+                - PATH=$GRADLE_HOME/bin:$PATH
+                - gradle clean build
+                # docker
+                # - IMAGE_VERSION=$(LC_TIME=ko_KR.UTF-8 date +'%Y-%m-%d.%H.%M.%S')
+                - IMAGE_VERSION="latest"
                 - IMAGE_TAG=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_VERSION
                 - docker build -t $IMAGE_TAG .
                 - docker push $IMAGE_TAG
@@ -951,21 +843,61 @@ Resources:
                 - FAMILY="skills-td"
                 - EXECUTION_ROLE_ARN="arn:aws:iam::$AWS_ACCOUNT_ID:role/${EcsTaskExecutionRole}"
                 - CONTAINER_NAME="skills-container"
-                - CONTAINER_PORT="80"
+                - CONTAINER_PORT="8080"
                 - CONTAINER_IMAGE="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$IMAGE_REPO_NAME:$IMAGE_VERSION"
                 - |
-                  jq -n --arg FAMILY $FAMILY --arg EXECUTION_ROLE_ARN $EXECUTION_ROLE_ARN --arg CONTAINER_NAME $CONTAINER_NAME --arg CONTAINER_IMAGE $CONTAINER_IMAGE --arg AWS_DEFAULT_REGION $AWS_DEFAULT_REGION \
-                    '{ "family":$FAMILY, "executionRoleArn":$EXECUTION_ROLE_ARN, "networkMode":"awsvpc", "cpu":"256", "memory":"512", "containerDefinitions":[{"logConfiguration":{"logDriver":"awslogs","options":{"awslogs-group":"/ecs/skills-td","awslogs-region":$AWS_DEFAULT_REGION,"awslogs-stream-prefix":"ecs"}},"name":$CONTAINER_NAME,"image":$CONTAINER_IMAGE,"portMappings":[{"containerPort":80,"hostPort":80,"protocol":"tcp"}]}] }' \
-                    > task-definition.json
-                - TASK_DEFINITION_JSON=$(aws ecs register-task-definition --cli-input-json file://task-definition.json)
-                - TASK_DEFINITION_ARN=$(echo $TASK_DEFINITION_JSON | jq -r '.taskDefinition .taskDefinitionArn')
-                - >
-                  jq -n --arg TASK_DEFINITION_ARN $TASK_DEFINITION_ARN --arg CONTAINER_NAME $CONTAINER_NAME --arg CONTAINER_PORT $CONTAINER_PORT \
-                  '{"version": 0.0, "Resources": [{"TargetService": {"Type": "AWS::ECS::Service", "Properties": {"TaskDefinition": $TASK_DEFINITION_ARN, "LoadBalancerInfo": {"ContainerName": $CONTAINER_NAME, "ContainerPort": $CONTAINER_PORT}}}}], "Hooks": []}' \
-                  > appspec.json
+                  echo "{
+                    'family':'$FAMILY',
+                    'executionRoleArn':'$EXECUTION_ROLE_ARN',
+                    'networkMode':'awsvpc',
+                    'cpu':'256',
+                    'memory':'512',
+                    'containerDefinitions':[
+                      {
+                        'healthCheck':{
+                          'command':[
+                            'CMD-SHELL',
+                            'curl -f http://localhost:8080/api/health || exit 1'
+                          ],
+                          'interval':10,
+                          'timeout':5,
+                          'retries':3,
+                          'startPeriod':0
+                        },
+                        'logConfiguration':{
+                          'logDriver':'awslogs',
+                          'options':{
+                            'awslogs-group':'/ecs/skills-td',
+                            'awslogs-region':'$AWS_DEFAULT_REGION',
+                            'awslogs-stream-prefix':'ecs'
+                          }
+                        },
+                        'name':'$CONTAINER_NAME',
+                        'image':'$CONTAINER_IMAGE',
+                        'portMappings':[
+                          {
+                            'containerPort':$CONTAINER_PORT,
+                            'hostPort':$CONTAINER_PORT,
+                            'protocol':'tcp'
+                          }
+                        ]
+                      }
+                    ]
+                  }" > taskdef.json
+                - |
+                  echo "version: 0.0
+                  Resources:
+                    - TargetService:
+                        Type: AWS::ECS::Service
+                        Properties:
+                          TaskDefinition: <TASK_DEFINITION>
+                          LoadBalancerInfo:
+                            ContainerName: '$CONTAINER_NAME'
+                            ContainerPort: $CONTAINER_PORT" > appspec.yaml
           artifacts:
             files:
-              - appspec.json
+              - taskdef.json
+              - appspec.yaml
             discard-paths: yes
         Type: CODEPIPELINE
       TimeoutInMinutes: 15
@@ -982,7 +914,7 @@ Resources:
             Action:
               - 'sts:AssumeRole'
       Policies:
-        - PolicyName: CodeBuildPolicy
+        - PolicyName: BackendCodeBuildPolicy
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -1012,7 +944,7 @@ Resources:
                   - ecs:*
                   - iam:PassRole
                 Resource: '*'
-      RoleName: CodeBuildRole
+      RoleName: BackendCodeBuildRole
   BackendCodeDeployApplication:
     Type: AWS::CodeDeploy::Application
     Properties:
@@ -1029,8 +961,7 @@ Resources:
         Events: 
           - DEPLOYMENT_FAILURE
           - DEPLOYMENT_STOP_ON_ALARM
-          - DEPLOYMENT_STOP_ON_REQUEST
-      DeploymentGroupName: skills-dg
+      DeploymentGroupName: !FindInMap [ResourceMap, BackendCodePipeline, DeploymentGroup]
       ServiceRoleArn: !GetAtt BackendCodeDeployIamRole.Arn
       DeploymentConfigName: CodeDeployDefault.ECSAllAtOnce
       DeploymentStyle:
@@ -1066,7 +997,7 @@ Resources:
             Action:
               - 'sts:AssumeRole'
       Policies:
-        - PolicyName: CodeDeployPolicy
+        - PolicyName: BackendCodeDeployPolicy
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -1094,9 +1025,12 @@ Resources:
                 Condition:
                   StringLike:
                     "iam:PassedToService" : "ecs-tasks.amazonaws.com"
-      RoleName: CodeDeployRole
+      RoleName: BackendCodeDeployRole
   BackendCodePipeline:
     Type: AWS::CodePipeline::Pipeline
+    DependsOn:
+      - Ecr 
+      - BackendCodeDeployDeploymentGroup
     Properties:
       Name: !FindInMap [ResourceMap, BackendCodePipeline, Name]
       PipelineType: V2
@@ -1139,11 +1073,15 @@ Resources:
               ActionTypeId: 
                 Category: Deploy
                 Owner: AWS
-                Provider: CodeDeploy
+                Provider: CodeDeployToECS
                 Version: 1
               Configuration:
-                ApplicationName: !Ref BackendCodeDeployApplication
-                DeploymentGroupName: !Ref BackendCodeDeployDeploymentGroup
+                ApplicationName: !FindInMap [ResourceMap, BackendCodePipeline, DeployApplication]
+                DeploymentGroupName: !FindInMap [ResourceMap, BackendCodePipeline, DeploymentGroup]
+                TaskDefinitionTemplateArtifact: BuildOutput
+                TaskDefinitionTemplatePath: taskdef.json
+                AppSpecTemplateArtifact: BuildOutput
+                AppSpecTemplatePath: appspec.yaml
               InputArtifacts:
                 - Name: BuildOutput
   BackendCodePipelineArtifactStoreS3Bucket:
@@ -1162,7 +1100,7 @@ Resources:
             Action:
               - 'sts:AssumeRole'
       Policies:
-        - PolicyName: CodePipelinePolicy
+        - PolicyName: BackendCodePipelinePolicy
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -1172,7 +1110,7 @@ Resources:
                 Resource:
                   - !Sub 
                       - "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${CodePipeline}"
-                      - CodePipeline: !FindInMap [ResourceMap, FrontendCodePipeline, Name]
+                      - CodePipeline: !FindInMap [ResourceMap, BackendCodePipeline, Name]
               - Effect: Allow
                 Action:
                   - codecommit:GetBranch
@@ -1180,13 +1118,13 @@ Resources:
                   - codecommit:UploadArchive
                   - codecommit:GetUploadArchiveStatus
                 Resource:
-                  - !GetAtt FrontendCodeCommit.Arn
+                  - !GetAtt BackendCodeCommit.Arn
               - Effect: Allow
                 Action:
                   - codebuild:StartBuild
                   - codebuild:BatchGetBuilds
                 Resource:
-                  - !GetAtt CodeBuild.Arn
+                  - !GetAtt BackendCodeBuild.Arn
               - Effect: Allow
                 Action:
                   - codedeploy:CreateDeployment
@@ -1194,8 +1132,8 @@ Resources:
                 Resource:
                   - !Sub 
                       - "arn:aws:codedeploy:${AWS::Region}:${AWS::AccountId}:deploymentgroup:${CodeDeployApplication}/${CodeDeployDeploymentGroup}"
-                      - CodeDeployApplication: !FindInMap [ResourceMap, FrontendCodePipeline, DeployApplication]
-                        CodeDeployDeploymentGroup: !FindInMap [ResourceMap, FrontendCodePipeline, DeploymentGroup]
+                      - CodeDeployApplication: !FindInMap [ResourceMap, BackendCodePipeline, DeployApplication]
+                        CodeDeployDeploymentGroup: !FindInMap [ResourceMap, BackendCodePipeline, DeploymentGroup]
               - Effect: Allow
                 Action:
                   - codedeploy:GetDeploymentConfig
@@ -1204,17 +1142,31 @@ Resources:
               - Effect: Allow
                 Action:
                   - codedeploy:RegisterApplicationRevision
+                  - codedeploy:GetApplication
                   - codedeploy:GetApplicationRevision
                 Resource:
                   - !Sub 
                       - "arn:aws:codedeploy:${AWS::Region}:${AWS::AccountId}:application:${CodeDeployApplication}"
-                      - CodeDeployApplication: !FindInMap [ResourceMap, FrontendCodePipeline, DeployApplication]
+                      - CodeDeployApplication: !FindInMap [ResourceMap, BackendCodePipeline, DeployApplication]
               - Effect: Allow
                 Action:
                   - s3:GetObject
                   - s3:PutObject
                 Resource: "*"
-      RoleName: CodePipelineRole
+              - Effect: Allow
+                Action:
+                  - ecs:RegisterTaskDefinition
+                Resource:
+                  - !Sub "arn:aws:ecs:${AWS::Region}:${AWS::AccountId}:task-definition/skills-td:*"
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/*"
+              - Effect: Allow
+                Action:
+                  - ecr:*
+                Resource: !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${Ecr}"
+      RoleName: BackendCodePipelineRole
   BackendCloudWatchEventRule:
     Type: AWS::Events::Rule
     Properties:
@@ -1246,9 +1198,9 @@ Resources:
         - Id: backend-codepipeline
           Arn: !Sub 
             - "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${CodePipeline}"
-            - CodePipeline: !FindInMap [ResourceMap, BackendCodeCommit, Name]
+            - CodePipeline: !FindInMap [ResourceMap, BackendCodePipeline, Name]
           RoleArn: !GetAtt CloudWatchEventRuleIamRole.Arn
-  
+
   CloudWatchEventRuleIamRole:
     Type: AWS::IAM::Role
     Properties:
@@ -1272,5 +1224,9 @@ Resources:
                 Resource:
                   - !Sub 
                       - "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${CodePipeline}"
-                      - CodePipeline: !FindInMap [ResourceMap, BackendCodeCommit, Name]
+                      - CodePipeline: !FindInMap [ResourceMap, FrontendCodePipeline, Name]
+                  - !Sub 
+                      - "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${CodePipeline}"
+                      - CodePipeline: !FindInMap [ResourceMap, BackendCodePipeline, Name]
       RoleName: CloudWatchEventRuleRole
+
