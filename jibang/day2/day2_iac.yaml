@@ -57,7 +57,7 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       AvailabilityZone: !Sub "${AWS::Region}a"
-      CidrBlock: !Select [1, !Cidr [ !GetAtt Vpc.CidrBlock, 16, 8 ]]
+      CidrBlock: !Select [11, !Cidr [ !GetAtt Vpc.CidrBlock, 16, 8 ]]
       Tags: 
         - Key : Name
           Value : !Join ["-", [!FindInMap [ResourceMap, PrivateSubnet, Name], "subnet", "a"]]
@@ -66,7 +66,7 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       AvailabilityZone: !Sub "${AWS::Region}b"
-      CidrBlock: !Select [2, !Cidr [ !GetAtt Vpc.CidrBlock, 16, 8 ]]
+      CidrBlock: !Select [12, !Cidr [ !GetAtt Vpc.CidrBlock, 16, 8 ]]
       Tags: 
         - Key : Name
           Value : !Join ["-", [!FindInMap [ResourceMap, PrivateSubnet, Name], "subnet", "b"]]
@@ -75,7 +75,7 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       AvailabilityZone: !Sub "${AWS::Region}a"
-      CidrBlock: !Select [11, !Cidr [ !GetAtt Vpc.CidrBlock, 16, 8 ]]
+      CidrBlock: !Select [1, !Cidr [ !GetAtt Vpc.CidrBlock, 16, 8 ]]
       Tags: 
         - Key : Name
           Value : !Join ["-", [!FindInMap [ResourceMap, PublicSubnet, Name], "subnet", "a"]]
@@ -84,7 +84,7 @@ Resources:
     Type: AWS::EC2::Subnet
     Properties:
       AvailabilityZone: !Sub "${AWS::Region}b"
-      CidrBlock: !Select [12, !Cidr [ !GetAtt Vpc.CidrBlock, 16, 8 ]]
+      CidrBlock: !Select [2, !Cidr [ !GetAtt Vpc.CidrBlock, 16, 8 ]]
       Tags: 
         - Key : Name
           Value : !Join ["-", [!FindInMap [ResourceMap, PublicSubnet, Name], "subnet", "b"]]
@@ -485,6 +485,9 @@ Resources:
               OriginProtocolPolicy: http-only
         PriceClass: PriceClass_All
         Staging: False
+      Tags:
+        - Key: Name
+          Value: skills-frontend-cdn
   CloudFrontOriginAccessControl:
     Type: AWS::CloudFront::OriginAccessControl
     Properties:
@@ -901,6 +904,9 @@ Resources:
             discard-paths: yes
         Type: CODEPIPELINE
       TimeoutInMinutes: 15
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
   BackendCodeBuildIamRole:
     Type: AWS::IAM::Role
     Properties:
