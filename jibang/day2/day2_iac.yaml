@@ -464,7 +464,6 @@ Resources:
               - GET
               - HEAD
             CachePolicyId: !Ref CloudFrontCachingDisabledPolicy
-            OriginRequestPolicyId: !Ref CloudFrontOriginRequestPolicy
             PathPattern: api/*
             TargetOriginId: AlbApi
             ViewerProtocolPolicy: redirect-to-https
@@ -530,20 +529,6 @@ Resources:
             HeaderBehavior: none
           QueryStringsConfig: 
             QueryStringBehavior: none
-  CloudFrontOriginRequestPolicy:
-    Type: AWS::CloudFront::OriginRequestPolicy
-    Properties:
-      OriginRequestPolicyConfig: 
-        CookiesConfig: 
-          CookieBehavior: none
-        HeadersConfig: 
-          HeaderBehavior: none
-        Name: CloudFrontOriginRequestPolicy
-        QueryStringsConfig: 
-          QueryStringBehavior: whitelist
-          QueryStrings: 
-            - name
-            - hash
 
   FrontendCodeCommit:
     Type: AWS::CodeCommit::Repository
