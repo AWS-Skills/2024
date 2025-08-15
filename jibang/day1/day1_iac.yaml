@@ -453,9 +453,9 @@ Resources:
             Action:
               - "iam:CreateServiceLinkedRole"
             Resource: "*"
-            Condition:
-              StringEquals: 
-                "iam:AWSServiceName": "elasticloadbalancing.amazonaws.com"
+            # Condition:
+              # StringEquals: 
+              #   "iam:AWSServiceName": "elasticloadbalancing.amazonaws.com"
           - Effect: "Allow"
             Action: 
               - "ec2:*"
@@ -494,9 +494,9 @@ Resources:
               - "autoscaling:SetDesiredCapacity"
               - "autoscaling:TerminateInstanceInAutoScalingGroup"
             Resource: "*"
-            Condition: 
-              StringEquals:
-                "aws:ResourceTag/k8s.io/cluster-autoscaler/${EksCluster}": "owned"
+            # Condition: 
+            #   StringEquals:
+            #     "aws:ResourceTag/k8s.io/cluster-autoscaler/${EksCluster}": "owned"
           - Sid: "VisualEditor1"
             Effect: "Allow"
             Action:
@@ -700,9 +700,9 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonEKSFargatePodExecutionRolePolicy
         - arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy
-      Condition:
-        ArnLike:
-          "aws:SourceArn": "arn:aws:eks:${AWS::Region}:${AWS::AccountId}:fargateprofile/${EksCluster}/*"
+      # Condition:
+      #   ArnLike:
+      #     "aws:SourceArn": "arn:aws:eks:${AWS::Region}:${AWS::AccountId}:fargateprofile/${EksCluster}/*"
       RoleName: EksFargatePodExecutionIamRole
   EksClusterAccessEntry:
     # To manage your EKS Cluster using 'kubectl' commands inside a Bastion EC2 
