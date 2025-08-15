@@ -728,8 +728,8 @@ Resources:
     Type: AWS::DocDB::DBCluster
     Properties:
       AvailabilityZones: 
-        - ${AWS::Region}a
-        - ${AWS::Region}b
+        - !Sub ${AWS::Region}a
+        - !Sub ${AWS::Region}b
       DBClusterIdentifier: skills-mongodb-cluster
       DBSubnetGroupName: !Ref DocumentDBSubnetGroup
       EnableCloudwatchLogsExports: 
